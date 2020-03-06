@@ -13,7 +13,7 @@ This fork add automatic conversion of 8-bit images into 4-bit if the conversor d
 * Basic RGB to color-index image conversion.
 
 ## Download
-Soon (tm)
+Precompiled Binary: [img2tim-ex_(v0.8).zip](https://github.com/ArthCarvalho/img2tim/releases/download/v0.8/img2tim-ex_.v0.8.zip) (Win32)
 
 ## Changelog
 **Version 0.8**
