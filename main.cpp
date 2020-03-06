@@ -8,7 +8,7 @@
 
 #include "tim.h"
 
-#define VERSION		"0.75"
+#define VERSION		"0.8"
 
 namespace param {
 
@@ -27,6 +27,8 @@ namespace param {
 	int TransCol		= -1;
 	int OutputBpp		= -1;
 
+	int Quantize        = false; // Quantize palette
+
 	tim::PARAM	tim = { 0 };
 
 }
@@ -41,6 +43,9 @@ typedef struct {
     short	numCols;
     void	*colors;
 
+    int     sourceBpp;
+    bool    from8to4;
+
 } IMGPARAM;
 
 
@@ -48,7 +53,7 @@ void ConvertImageToTim(IMGPARAM image, tim::PARAM* tim);
 int SimpleQuantize(tim::PARAM* tim, int bitDepth);
 
 
-int LoadImagePixels(const char* fileName, IMGPARAM* image, bool makeRGBA);
+int LoadImagePixels(const char* fileName, IMGPARAM* image, bool makeRGBA, int bppMode);
 void FreeImageStruct(IMGPARAM* image);
 
 
@@ -56,8 +61,8 @@ int main(int argc, char *argv[]) {
 
     FreeImage_Initialise(false);
 
-    printf("img2tim v%s - Converts most image files into PlayStation TIM files\n", VERSION);
-    printf("2016 Meido-Tek Productions (Lameguy64/TheCodingBrony)\n");
+    printf("IMG2TIM-EX v%s - Converts image files into PlayStation TIM files\n", VERSION);
+    printf("2020 Arthur C. S. Lima, 2016 Meido-Tek Productions (Lameguy64/TheCodingBrony)\n");
     printf("Powered by FreeImage v%s\n\n", FreeImage_GetVersion());
 
 	// Print banner if no arguments were passed
@@ -81,7 +86,9 @@ int main(int argc, char *argv[]) {
 		printf("  -tcol <r g b> - Specify RGB color value to be treated as transparent.\n");
 		printf("  -bpp <bpp>    - Specify color depth for the output TIM file\n");
 		printf("                  (Default: Color depth of source image, 24 is never default).\n");
-
+        printf("  -quantize     - Enable Palette quantization.\n");
+        printf("                  (Enabling this will modify the original palette,\n"
+               "                   not recommended for pixel art)\n");
 		/*
         printf("   -tc <r g b>   - Specify color to be treated as transparent.\n");
         printf("   -bc <r g b>   - Specify blending color when converting alpha-blended pixels.\n");
@@ -173,6 +180,9 @@ int main(int argc, char *argv[]) {
 
 			i++;
 
+        } else if (strcmp(arg, "-quantize") == 0) { // Make RGBA and quantize palette
+            param::Quantize = true;
+            i++;
         } else if (arg[0] == '-') {
 
             printf("Unknown parameter: %s\n", argv[i]);
@@ -222,7 +232,7 @@ int main(int argc, char *argv[]) {
 	printf("Output Bpp  : ");
 	if (param::OutputBpp == -1) {
 
-		if (!LoadImagePixels(param::InputFile, &image, false)) {
+		if (!LoadImagePixels(param::InputFile, &image, false, param::OutputBpp)) {
 			return(EXIT_FAILURE);
 		}
 
@@ -235,13 +245,23 @@ int main(int argc, char *argv[]) {
 			printf("4");
 		printf(")\n\n");
 
+        if (param::Quantize == true) {
+          if (image.fmt != 1 || image.fmt != 2) {
+            printf("Warning: Quantizing a paletted image will destroy the original palette.\n\n");
+          }
+        }
+
 		ConvertImageToTim(image, &param::tim);
 
 	} else {
 
-		printf("%d\n\n", param::OutputBpp);
+		if (param::Quantize == true) {
+          if (image.fmt != 1 || image.fmt != 2) {
+            printf("Warning: Quantizing a paletted image will destroy the original palette.\n\n");
+          }
+        }
 
-		if (!LoadImagePixels(param::InputFile, &image, true)) {
+		if (!LoadImagePixels(param::InputFile, &image, param::Quantize, param::OutputBpp)) {
 			return(EXIT_FAILURE);
 		}
 
@@ -249,17 +269,23 @@ int main(int argc, char *argv[]) {
 
 		if (param::OutputBpp <= 8) {
 
-			if (!SimpleQuantize(&param::tim, param::OutputBpp)) {
+            if(param::Quantize){
+                if (!SimpleQuantize(&param::tim, param::OutputBpp)) {
 
-				tim::FreeParam(&param::tim);
-				FreeImageStruct(&image);
+                    tim::FreeParam(&param::tim);
+                    FreeImageStruct(&image);
 
-				exit(1);
+                    exit(1);
 
-			}
+                }
+            }
+
+            tim::FreeParam(&param::tim);
+            FreeImageStruct(&image);
+
+            exit(1);
 
 		}
-
 
 	}
 
@@ -390,7 +416,7 @@ void ConvertImageToTim(IMGPARAM image, tim::PARAM* tim) {
 
 		}
 
-	} else if (image.fmt == 1) {	// Convert 8-bit palletized
+	} else if (image.fmt == 1 && !image.from8to4) {	// Convert 8-bit palletized
 
 		if ((image.w%2) != 0)
 			printf("WARNING: Image width is not a multiple of 2, output may be broken.\n");
@@ -458,7 +484,7 @@ void ConvertImageToTim(IMGPARAM image, tim::PARAM* tim) {
 		tim->imgWidth	= image.w;
 		tim->imgHeight	= image.h;
 
-	} else if (image.fmt == 2) {	// Convert image for 4-bit TIM
+	} else if (image.fmt == 2 || image.from8to4) {	// Convert image for 4-bit TIM
 
 		if ((image.w%4) != 0)
 			printf("WARNING: Image width is not a multiple of 4, output may be broken.\n");
@@ -516,14 +542,25 @@ void ConvertImageToTim(IMGPARAM image, tim::PARAM* tim) {
 
 		tim->imgData = malloc((image.w/2)*image.h);
 
-		for(short py=0; py<image.h; py++) {
+		if(!image.from8to4){
+            for(short py=0; py<image.h; py++) {
 
-			for(short px=0; px<image.w/2; px++) {
+                for(short px=0; px<image.w/2; px++) {
 
-				u_char pix = ((u_char*)image.pixels)[px+((image.w/2)*py)];
-				((u_char*)tim->imgData)[px+((image.w/2)*py)] = ((pix&0xf)<<4)|((pix>>4)&0xf);
+                    u_char pix = ((u_char*)image.pixels)[px+((image.w/2)*py)];
+                    ((u_char*)tim->imgData)[px+((image.w/2)*py)] = ((pix&0xf)<<4)|((pix>>4)&0xf);
 
-			}
+                }
+
+            }
+		} else {
+		    for(short py=0; py<image.h; py++) {
+                for(short px=0; px<image.w/2; px++) {
+                    u_char pixA = ((u_char*)image.pixels)[(px*2)+(image.w)*py];
+                    u_char pixB = ((u_char*)image.pixels)[(px*2)+1+(image.w)*py];
+                    ((u_char*)tim->imgData)[px+((image.w/2)*py)] = ((pixB&0xf)<<4)|((pixA)&0xf);
+                }
+		    }
 
 		}
 
@@ -688,8 +725,11 @@ int SimpleQuantize(tim::PARAM* tim, int bitDepth) {
 
 }
 
+int CompareRGBQUAD(RGBQUAD * a, RGBQUAD * b) {
+    return (a->rgbRed == b->rgbRed && a->rgbGreen == b->rgbGreen && a->rgbBlue == b->rgbBlue);
+}
 
-int LoadImagePixels(const char* fileName, IMGPARAM* image, bool makeRGBA) {
+int LoadImagePixels(const char* fileName, IMGPARAM* image, bool makeRGBA, int bppMode) {
 
 
 	// Check if file exists
@@ -758,6 +798,10 @@ int LoadImagePixels(const char* fileName, IMGPARAM* image, bool makeRGBA) {
 
 	}
 
+	// Convert 8-bit to 4-bit flag
+	// Set it to false beforehand
+	image->from8to4 = false;
+
 
 	switch(FreeImage_GetBPP(srcImage)) {
 	case 32:	// 32-bit images
@@ -769,6 +813,8 @@ int LoadImagePixels(const char* fileName, IMGPARAM* image, bool makeRGBA) {
 		image->numCols	= 0;
 		image->colors	= NULL;
 		image->pixels	= malloc(4*(image->w*image->h));
+
+		image->sourceBpp = 32;
 
         for(short py=0; py<image->h; py++) {
 
@@ -791,14 +837,64 @@ int LoadImagePixels(const char* fileName, IMGPARAM* image, bool makeRGBA) {
 		break;
 
 	case 8:		// 8-bit palletized
-
 		image->fmt	= 1;
 		image->w	= FreeImage_GetWidth(srcImage);
 		image->h	= FreeImage_GetHeight(srcImage);
 
 		image->numCols	= 256;
 		image->colors	= malloc(4*256);
+
 		memcpy(image->colors, FreeImage_GetPalette(srcImage), 4*256);
+
+		image->sourceBpp = 8;
+
+		if (bppMode != 8) {
+            // Some file formats are always 8-bit even when
+            // the artist meant them to be 4-bit, so auto-detect if
+            // colors above the 16th color are: all the same,
+            // if they are, this means that not only the rest of the palette
+            // is unused.
+
+            // Analyze palette colors
+            // Check if all colors are the same
+            RGBQUAD * palcolors = (RGBQUAD *)image->colors;
+            bool paletteIsGrayScale = true;
+            bool upperPalGrayScale = true;
+            bool upperPalSameColor = true;
+
+            // Check if this image contains only grayscale values, if so, export as 8 bit anyway.
+            // Some image editors apparently do this to unused colors (i.e.: Aseprite)
+            for(int i = 0; i < 256; i++) {
+                if(palcolors[i].rgbRed != i) {
+                    paletteIsGrayScale = false;
+                    if(i >= 16){
+                        upperPalGrayScale = false;
+                    }
+                }
+            }
+
+            if(!paletteIsGrayScale) {
+                // Check if the colors above 16 are the same color
+                RGBQUAD lastColor = palcolors[16];
+                for(int i = 16; i < 256; i++) {
+                    bool colorEqual = CompareRGBQUAD(&lastColor, &palcolors[i]);
+                    lastColor = palcolors[i];
+                    if(!colorEqual){
+                        upperPalSameColor = false;
+                    }
+                }
+            }
+
+            if(!paletteIsGrayScale && (upperPalGrayScale || upperPalSameColor)) {
+                image->from8to4 = true;
+            }
+
+            // Emit a warning to the user that the palette is going to clip.
+            if(image->from8to4) {
+                printf("Input Bpp (8) >> Output Bpp (4) (Automatic Coneversion)\n\nPalette appears to contain only 16 colors,"
+                       "the image will be converted as 4bpp.\nIf this is not what you want, use -bpp 8 to force 8-bit mode. ");
+            }
+		}
 
 		image->pixels	= malloc(image->w*image->h);
 
@@ -822,6 +918,8 @@ int LoadImagePixels(const char* fileName, IMGPARAM* image, bool makeRGBA) {
 		memcpy(image->colors, FreeImage_GetPalette(srcImage), 4*16);
 
 		image->pixels	= malloc((image->w/2)*image->h);
+
+		image->sourceBpp = 4;
 
 		for(short py=0; py<image->h; py++) {
 
