@@ -8,7 +8,7 @@
 
 #include "tim.h"
 
-#define VERSION		"0.8"
+#define VERSION		"0.9"
 
 namespace param {
 
@@ -25,6 +25,11 @@ namespace param {
 	int TransColB		= -1;
 
 	int TransCol		= -1;
+
+	int SemiTransCol    = -1;       // Sets semi-transparent bit on specified index
+	int SemiTransStart  = -1;       // Sets semi-transparent bit on specified range.
+	int SemiTransEnd    = -1;       // Requires both to be set.
+
 	int OutputBpp		= -1;
 
 	int Quantize        = false; // Quantize palette
@@ -83,6 +88,9 @@ int main(int argc, char *argv[]) {
         printf("                  mask (Default: 127).\n");
         printf("  -tindex <col> - Specify color index to be treated as transparent (ignored on\n");
         printf("                  non palletized images).\n");
+        printf("  -sindex <col> - Specify a single index to be treated as semi-transparent\n");
+        printf("                   (ignored on non palletized images).\n");
+        printf("  -srange <s e> - Semi-transparent index range (s = start, e = end)\n");
 		printf("  -tcol <r g b> - Specify RGB color value to be treated as transparent.\n");
 		printf("  -bpp <bpp>    - Specify color depth for the output TIM file\n");
 		printf("                  (Default: Color depth of source image, 24 is never default).\n");
@@ -164,9 +172,21 @@ int main(int argc, char *argv[]) {
 			param::TransColB = atoi(argv[i+1]);
 			i++;
 
+		} else if (strcmp(arg, "-srange") == 0) {
+
+			param::SemiTransStart = atoi(argv[i+1]);
+			i++;
+			param::SemiTransEnd = atoi(argv[i+1]);
+			i++;
+
 		} else if (strcmp(arg, "-tindex") == 0) {
 
 			param::TransCol = atoi(argv[i+1]);
+			i++;
+
+		} else if (strcmp(arg, "-sindex") == 0) {
+
+			param::SemiTransCol = atoi(argv[i+1]);
 			i++;
 
 		} else if (strcmp(arg, "-bpp") == 0) {
@@ -255,6 +275,8 @@ int main(int argc, char *argv[]) {
 
 	} else {
 
+		printf("%d\n\n", param::OutputBpp);
+
 		if (param::Quantize == true) {
           if (image.fmt != 1 || image.fmt != 2) {
             printf("Warning: Quantizing a paletted image will destroy the original palette.\n\n");
@@ -305,6 +327,9 @@ int main(int argc, char *argv[]) {
 
 void ConvertImageToTim(IMGPARAM image, tim::PARAM* tim) {
 
+    printf("Conversion!!!! image.fmt = %d\n",image.fmt);
+    printf("Source Bpp = %d\n",image.sourceBpp);
+    printf("256 to 16 = %d\n",image.from8to4);
 	if (image.fmt == 0) {
 
 		if (param::OutputBpp == 24) {	// Convert image from 32-bit RGBA to 24-bit RGB
@@ -470,6 +495,16 @@ void ConvertImageToTim(IMGPARAM image, tim::PARAM* tim) {
 
 			}
 
+			// Force newer parameters to override older settings.
+			// Single Semi-trans index
+			if(c == param::SemiTransCol){
+                ((tim::PIX_RGB5*)tim->clutData)[c].i	= 1;
+			}
+			// Semi-trans range
+			if(c >= param::SemiTransStart && c <= param::SemiTransEnd){
+                ((tim::PIX_RGB5*)tim->clutData)[c].i	= 1;
+			}
+
         }
 
 		tim->imgData = malloc(image.w*image.h);
@@ -538,6 +573,16 @@ void ConvertImageToTim(IMGPARAM image, tim::PARAM* tim) {
 
 			}
 
+			// Force newer parameters to override older settings.
+			// Single Semi-trans index
+			if(c == param::SemiTransCol){
+                ((tim::PIX_RGB5*)tim->clutData)[c].i	= 1;
+			}
+			// Semi-trans range
+			if(c >= param::SemiTransStart && c <= param::SemiTransEnd){
+                ((tim::PIX_RGB5*)tim->clutData)[c].i	= 1;
+			}
+
         }
 
 		tim->imgData = malloc((image.w/2)*image.h);
@@ -559,7 +604,9 @@ void ConvertImageToTim(IMGPARAM image, tim::PARAM* tim) {
                     u_char pixA = ((u_char*)image.pixels)[(px*2)+(image.w)*py];
                     u_char pixB = ((u_char*)image.pixels)[(px*2)+1+(image.w)*py];
                     ((u_char*)tim->imgData)[px+((image.w/2)*py)] = ((pixB&0xf)<<4)|((pixA)&0xf);
+                    printf("%x%x",pixA,pixB);
                 }
+                printf("\n");
 		    }
 
 		}
@@ -884,6 +931,8 @@ int LoadImagePixels(const char* fileName, IMGPARAM* image, bool makeRGBA, int bp
                     }
                 }
             }
+
+            //printf("paletteIsGrayScale: %d\nupperPalGrayScale: %d\nupperPalSameColor: %d\n",paletteIsGrayScale,upperPalGrayScale,upperPalSameColor);
 
             if(!paletteIsGrayScale && (upperPalGrayScale || upperPalSameColor)) {
                 image->from8to4 = true;

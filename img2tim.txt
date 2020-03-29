@@ -1,13 +1,9 @@
-img2tim by Lameguy64 of Meido-Tek Productions
+img2tim by Lameguy64 of Meido-Tek Productions,
+additional functions by Arthur Carvalho de Souza Lima.
 
 
-This tool converts almost any image file supported by FreeImage into a PlayStation standard TIM
-texture image file. Made to replace the bmp2tim tool that came with the PsyQ SDK with additional
-features not present in the original program.
-
-The program itself is still a work in progress but its complete enough as a usable tool.
-Alpha-blending options and better color-index conversion have yet to be implemented.
-
+Converts image files supported by FreeImage into a PlayStation TIM for PlayStation homebrew development. Uses the FreeImage library.
+This fork add automatic conversion of 8-bit images into 4-bit if the conversor detects that only the first 16 colors are used.
 
 Option Details:
 
@@ -67,3 +63,7 @@ Option Details:
 		found.
 
 		Supported output color depths: 4, 8, 16, 24
+        
+-sindex < col > - Specify a single color index to set the semi-transparency bit.
+
+-srange < start end > - Specify a range of colors indices to be set to semi-transparent.
